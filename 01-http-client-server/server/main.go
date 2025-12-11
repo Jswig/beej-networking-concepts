@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 )
 
 func main() {
@@ -28,7 +29,6 @@ func runServer(args []string) error {
 	if err != nil || port > 65535 || port < 1 {
 		return fmt.Errorf("invalid port: %s", args[1])
 	}
-	fmt.Printf("port: %d", port)
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
@@ -46,7 +46,9 @@ func runServer(args []string) error {
 
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
-	fmt.Print("handling connection...\n")
+	address := conn.RemoteAddr()
+	ipAddress := strings.Split(address.String(), ":")[0]
+	fmt.Printf("connection from IP address: %s\n", ipAddress)
 	headers := []string{}
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(bufio.ScanLines)
