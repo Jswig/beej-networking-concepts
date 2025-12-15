@@ -2,12 +2,17 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
+	"net"
 	"os"
 	"strconv"
 )
 
 func main() {
-	runServer(os.Args)
+	if err := runServer(os.Args); err != nil {
+		log.Fatalf("fatal: %v", err)
+	}
 }
 
 func runServer(args []string) error {
@@ -26,6 +31,22 @@ func runServer(args []string) error {
 	} else {
 		return fmt.Errorf("usage: client [host] ([port])")
 	}
-	fmt.Printf("host=%s,port=%v", host, port)
+
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
+	if err != nil {
+		return fmt.Errorf("error creating connection: %v", err)
+	}
+	fmt.Printf("network address=%v", conn.RemoteAddr())
+	httpGetHeaderTemplate := "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n"
+	_, err = fmt.Fprintf(conn, httpGetHeaderTemplate, host)
+	if err != nil {
+		return fmt.Errorf("error making HTTP request: %v", err)
+	}
+	response, err := io.ReadAll(conn)
+	if err != nil {
+		return fmt.Errorf("error reading HTTP response %v", err)
+	}
+	fmt.Print(string(response))
+
 	return nil
 }
