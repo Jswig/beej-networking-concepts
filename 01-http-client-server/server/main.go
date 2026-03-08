@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	err := runServer(os.Args)
+	err := run(os.Args)
 	if err != nil {
 		fmt.Printf("%s\n", err)
 		os.Exit(1)
@@ -22,24 +22,51 @@ func main() {
 
 const responseTemplate = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s\r\n"
 
-func runServer(args []string) error {
+func run(args []string) error {
+	port, err := parseArgs(args)
+	if err != nil {
+		return err
+	}
+
+	listener, err := setupListener(port)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	err = acceptConnections(listener)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func parseArgs(args []string) (int, error) {
+	var port int
 	if len(args) != 2 {
-		return fmt.Errorf("usage: server [port]")
+		return port, fmt.Errorf("usage: server [port]")
 	}
 	port, err := strconv.Atoi(args[1])
 	if err != nil || port > 65535 || port < 1 {
-		return fmt.Errorf("invalid port: %s", args[1])
+		return port, fmt.Errorf("invalid port: %s", args[1])
 	}
+	return port, nil
+}
 
+func setupListener(port int) (net.Listener, error) {
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		return fmt.Errorf("error listening on ports %d: %v", port, err)
+		return listener, fmt.Errorf("error listening on ports %d: %v", port, err)
 	}
-	defer listener.Close()
+	return listener, nil
+}
+
+func acceptConnections(listener net.Listener) error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("error accepting connections: %v", err)
 		}
 		handleConnection(conn)
 	}
