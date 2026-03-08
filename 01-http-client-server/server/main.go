@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -23,7 +24,7 @@ const responseTemplate = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent
 
 func runServer(args []string) error {
 	if len(args) != 2 {
-		return fmt.Errorf("usage: client [port]")
+		return fmt.Errorf("usage: server [port]")
 	}
 	port, err := strconv.Atoi(args[1])
 	if err != nil || port > 65535 || port < 1 {
@@ -48,12 +49,23 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	address := conn.RemoteAddr()
 	ipAddress := strings.Split(address.String(), ":")[0]
-	fmt.Printf("connection from IP address: %s\n", ipAddress)
+	log.Printf("connection from IP address: %s\n", ipAddress)
 	headers := []string{}
 	scanner := bufio.NewScanner(conn)
 	scanner.Split(bufio.ScanLines)
+
+	lineCount := 0
 	for scanner.Scan() {
 		line := scanner.Text()
+		if lineCount == 0 {
+			httpMethod, err := parseHTTPMethod(line)
+			if err == nil {
+				log.Printf("HTTP method: %v\n", httpMethod)
+			} else {
+				log.Printf("error parsing HTTP methods: %s\n", err)
+			}
+		}
+		lineCount++
 		if line == "" {
 			break
 		}
@@ -64,4 +76,29 @@ func handleConnection(conn net.Conn) {
 	if err != nil {
 		log.Fatalf("error writing reponse: %s", err)
 	}
+}
+
+type httpMethod string
+
+func newHttpMethod(s string) (httpMethod, error) {
+	methods := []string{
+		"DELETE",
+		"GET",
+		"PATCH",
+		"POST",
+		"PUT",
+	}
+	if slices.Contains(methods, s) {
+		return httpMethod(s), nil
+	} else {
+		return "", fmt.Errorf("%s is not a valid HTTP method", s)
+	}
+}
+
+func parseHTTPMethod(line string) (httpMethod, error) {
+	words := strings.Split(line, " ")
+	if len(words) < 1 {
+		return "", fmt.Errorf("no HTTP method found")
+	}
+	return newHttpMethod(words[0])
 }
