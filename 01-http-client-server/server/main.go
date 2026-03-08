@@ -2,17 +2,17 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 )
 
 func main() {
-	err := run(os.Args)
+	err := run(os.Args[1:])
 	if err != nil {
 		fmt.Printf("%s\n", err)
 		os.Exit(1)
@@ -23,12 +23,12 @@ func main() {
 const responseTemplate = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s\r\n"
 
 func run(args []string) error {
-	port, err := parseArgs(args)
+	cfg, err := parseArgs(args)
 	if err != nil {
 		return err
 	}
 
-	listener, err := setupListener(port)
+	listener, err := setupListener(cfg)
 	if err != nil {
 		return err
 	}
@@ -42,22 +42,26 @@ func run(args []string) error {
 	return nil
 }
 
-func parseArgs(args []string) (int, error) {
-	var port int
-	if len(args) != 2 {
-		return port, fmt.Errorf("usage: server [port]")
-	}
-	port, err := strconv.Atoi(args[1])
-	if err != nil || port > 65535 || port < 1 {
-		return port, fmt.Errorf("invalid port: %s", args[1])
-	}
-	return port, nil
+type serverConfig struct {
+	port int
 }
 
-func setupListener(port int) (net.Listener, error) {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+const defaultPort = 80
+
+func parseArgs(args []string) (*serverConfig, error) {
+	f := flag.NewFlagSet("server", flag.ContinueOnError)
+	port := f.Int("port", defaultPort, "port to listen on")
+	err := f.Parse(args)
 	if err != nil {
-		return listener, fmt.Errorf("error listening on ports %d: %v", port, err)
+		return nil, err
+	}
+	return &serverConfig{*port}, nil
+}
+
+func setupListener(cfg *serverConfig) (net.Listener, error) {
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.port))
+	if err != nil {
+		return listener, fmt.Errorf("error listening on ports %d: %v", cfg.port, err)
 	}
 	return listener, nil
 }

@@ -2,15 +2,20 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"strconv"
+	"strings"
 )
 
+const noBody = ""
+
 func main() {
-	err := run(os.Args)
+	err := run(os.Args[1:])
 	if err != nil {
 		fmt.Printf("%s\n", err)
 		os.Exit(1)
@@ -19,8 +24,9 @@ func main() {
 }
 
 type clientParams struct {
-	host string
-	port int
+	host    string
+	port    int
+	payload string
 }
 
 func run(args []string) error {
@@ -35,7 +41,9 @@ func run(args []string) error {
 	}
 	defer conn.Close()
 
-	err = writeRequest(conn, params.host)
+	request := buildRequest(params)
+
+	err = writeRequest(conn, request)
 	if err != nil {
 		return err
 	}
@@ -49,26 +57,39 @@ func run(args []string) error {
 	return nil
 }
 
-func parseArgs(args []string) (clientParams, error) {
-	var host string
-	var port int
-	var err error
-	if len(args) == 3 {
-		host = args[1]
-		port, err = strconv.Atoi(args[2])
-		if err != nil {
-			return clientParams{}, fmt.Errorf("invalid port: %s", args[2])
-		}
-	} else if len(args) == 2 {
-		host = args[1]
-		port = 80
-	} else {
-		return clientParams{}, fmt.Errorf("usage: client [host] ([port])")
+const defaultPort = 80
+
+const hostNotProvided = "NOT_PROVIDED"
+
+func parseArgs(args []string) (*clientParams, error) {
+	f := flag.NewFlagSet("client", flag.ContinueOnError)
+	invalidArguments := errors.New("usage: client --host=[host] (--port=[port]) ([payload])")
+
+	port := f.Int("port", defaultPort, "port to connect to")
+	host := f.String("host", hostNotProvided, "host to connect to")
+	err := f.Parse(args)
+	if err != nil {
+		return &clientParams{}, err
 	}
-	return clientParams{host, port}, nil
+
+	if *host == hostNotProvided {
+		return &clientParams{}, invalidArguments
+	}
+
+	positionalArgs := f.Args()
+	var payload string
+	if f.NArg() == 0 {
+		payload = noBody
+	} else if f.NArg() == 1 {
+		payload = positionalArgs[0]
+	} else {
+		return &clientParams{}, invalidArguments
+	}
+
+	return &clientParams{*host, *port, payload}, nil
 }
 
-func makeConnection(p clientParams) (net.Conn, error) {
+func makeConnection(p *clientParams) (net.Conn, error) {
 	address := p.host + ":" + strconv.Itoa(p.port)
 	conn, err := net.Dial("tcp", address)
 	if err != nil {
@@ -77,8 +98,43 @@ func makeConnection(p clientParams) (net.Conn, error) {
 	return conn, nil
 }
 
-func writeRequest(conn net.Conn, host string) error {
-	request := fmt.Sprintf("GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host)
+func buildRequest(p *clientParams) string {
+	var httpMethod string
+	if p.payload != noBody {
+		httpMethod = "GET"
+	} else {
+		httpMethod = "POST"
+	}
+	methodHeader := fmt.Sprintf("%s / HTTP/1.1", httpMethod)
+	hostHeader := fmt.Sprintf("Host: %s", p.host)
+	closeHeader := "Connection: close"
+	blankLine := "\r\n"
+
+	var lines []string
+	if p.payload != noBody {
+		contentTypeHeader := "Content-Type: text/plain"
+		contentLengthHeader := fmt.Sprintf("Content-Length: %d", len(p.payload))
+		lines = []string{
+			methodHeader,
+			hostHeader,
+			contentTypeHeader,
+			contentLengthHeader,
+			closeHeader,
+			blankLine,
+			p.payload,
+		}
+	} else {
+		lines = []string{
+			methodHeader,
+			hostHeader,
+			closeHeader,
+			blankLine,
+		}
+	}
+	return strings.Join(lines, "\r\n")
+}
+
+func writeRequest(conn net.Conn, request string) error {
 	_, err := conn.Write([]byte(request))
 	if err != nil {
 		return fmt.Errorf("error sending HTTP request: %s", err)
