@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -81,55 +83,119 @@ func handleConnection(conn net.Conn) {
 	address := conn.RemoteAddr()
 	ipAddress := strings.Split(address.String(), ":")[0]
 	log.Printf("connection from IP address: %s\n", ipAddress)
-	headers := []string{}
-	scanner := bufio.NewScanner(conn)
-	scanner.Split(bufio.ScanLines)
 
 	lineCount := 0
+	headers := make(map[header]string)
+
+	scanner := bufio.NewScanner(conn)
+	scanner.Split(bufio.ScanLines)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if lineCount == 0 {
-			httpMethod, err := parseHTTPMethod(line)
+		lineCount++
+		if line == "" {
+			break
+		} else if lineCount == 1 {
+			httpMethod, err := parseRequestLine(line)
 			if err == nil {
 				log.Printf("HTTP method: %v\n", httpMethod)
 			} else {
 				log.Printf("error parsing HTTP methods: %s\n", err)
 			}
+		} else {
+			key, value, err := parseHeader(line)
+			if err != nil {
+				log.Printf("error parsing HTTP header: %s", err)
+			} else {
+				headers[key] = value
+			}
 		}
-		lineCount++
-		if line == "" {
-			break
-		}
-		headers = append(headers, line)
 	}
+
+	_, hasContentType := headers[contentType]
+	length, hasContentLength := headers[contentLength]
+	if hasContentType && hasContentLength {
+		bytesCount, _ := strconv.Atoi(length)
+		buf := make([]byte, bytesCount)
+		_, err := io.ReadFull(conn, buf)
+		if err != nil {
+			log.Printf("error reading HTTP request body: %s", err)
+		} else {
+			body := string(buf)
+			log.Printf("HTTP request body: %s", body)
+		}
+	}
+
 	responseText := "Hello!"
 	_, err := fmt.Fprintf(conn, responseTemplate, len(responseText), responseText)
 	if err != nil {
-		log.Fatalf("error writing reponse: %s", err)
+		log.Printf("error writing response to request: %s", err)
 	}
 }
 
-type httpMethod string
+type header string
 
-func newHttpMethod(s string) (httpMethod, error) {
-	methods := []string{
-		"DELETE",
-		"GET",
-		"PATCH",
-		"POST",
-		"PUT",
+const (
+	connection    header = "connection"
+	contentLength header = "content-length"
+	contentType   header = "content-type"
+	host          header = "host"
+)
+
+// constant for legal HTTP headers
+var headers = []header{
+	connection,
+	contentLength,
+	contentType,
+	host,
+}
+
+func parseHeader(line string) (h header, v string, err error) {
+	elements := strings.Split(line, ": ")
+	if len(elements) != 2 {
+		print("failed at length check")
+		err = fmt.Errorf("%s is not a valid HTTP header", line)
+	} else {
+		// HTTP headers are case-insensitive
+		h = header(strings.ToLower(elements[0]))
+		v = elements[1]
+		if !slices.Contains(headers, h) {
+			err = fmt.Errorf("%s is not a known HTTP header", h)
+		}
 	}
-	if slices.Contains(methods, s) {
-		return httpMethod(s), nil
+	return h, v, err
+}
+
+type method string
+
+const (
+	get    method = "GET"
+	delete method = "DELETE"
+	patch  method = "PATCH"
+	post   method = "POST"
+	put    method = "PUT"
+)
+
+// constant for legal HTTP methods
+var methods = []method{
+	get,
+	delete,
+	patch,
+	post,
+	put,
+}
+
+func parseMethod(s string) (method, error) {
+	if slices.Contains(methods, method(s)) {
+		return method(s), nil
 	} else {
 		return "", fmt.Errorf("%s is not a valid HTTP method", s)
 	}
 }
 
-func parseHTTPMethod(line string) (httpMethod, error) {
+func parseRequestLine(line string) (method, error) {
 	words := strings.Split(line, " ")
 	if len(words) < 1 {
 		return "", fmt.Errorf("no HTTP method found")
 	}
-	return newHttpMethod(words[0])
+	return parseMethod(words[0])
 }
