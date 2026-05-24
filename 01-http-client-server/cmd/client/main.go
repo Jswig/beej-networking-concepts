@@ -65,18 +65,18 @@ const payloadNotProvided = ""
 
 func parseArgs(args []string) (*clientParams, error) {
 	f := flag.NewFlagSet("client", flag.ContinueOnError)
-	invalidArguments := errors.New("usage: client --host=[host] (--port=[port]) ([payload])")
+	invalidArguments := errors.New("usage: client --host=[host] (--port=[port]) (--payload=[payload])")
 
 	port := f.Int("port", defaultPort, "port to connect to")
 	host := f.String("host", hostNotProvided, "host to connect to")
 	payload := f.String("payload", payloadNotProvided, "HTTP payload")
 	err := f.Parse(args)
 	if err != nil {
-		return &clientParams{}, err
+		return nil, err
 	}
 
 	if *host == hostNotProvided {
-		return &clientParams{}, invalidArguments
+		return nil, invalidArguments
 	}
 
 	return &clientParams{*host, *port, *payload}, nil
@@ -101,7 +101,7 @@ func buildRequest(p *clientParams) string {
 	methodHeader := fmt.Sprintf("%s / HTTP/1.1", httpMethod)
 	hostHeader := fmt.Sprintf("Host: %s", p.host)
 	closeHeader := "Connection: close"
-	blankLine := "\r\n"
+	blankLine := ""
 
 	var lines []string
 	if p.payload != noBody {
@@ -128,6 +128,7 @@ func buildRequest(p *clientParams) string {
 }
 
 func writeRequest(conn net.Conn, request string) error {
+	fmt.Printf("%s\n", request)
 	_, err := conn.Write([]byte(request))
 	if err != nil {
 		return fmt.Errorf("error sending HTTP request: %s", err)

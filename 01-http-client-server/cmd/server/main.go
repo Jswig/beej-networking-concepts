@@ -119,7 +119,8 @@ func writeDefaultResponse(w io.Writer) error {
 const noRequestBody = ""
 
 func ParseRequest(r io.Reader) (*http.Request, error) {
-	method, headers, err := parseHead(r)
+	buf := bufio.NewReader(r)
+	method, headers, err := parseHead(buf)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing HTTP request head: %s", err)
 	}
@@ -128,11 +129,10 @@ func ParseRequest(r io.Reader) (*http.Request, error) {
 	var hasBody bool
 	var body string
 	if numBytes > 0 {
-		body, err = readBody(r, numBytes)
+		body, err = readBody(buf, numBytes)
 		if err != nil {
 			return nil, err
 		}
-		log.Printf("HTTP request body: %s", body)
 		hasBody = true
 	} else {
 		body = noRequestBody
@@ -142,22 +142,26 @@ func ParseRequest(r io.Reader) (*http.Request, error) {
 	return &http.Request{method, headers, body, hasBody}, nil
 }
 
-func parseHead(r io.Reader) (http.Method, http.Headers, error) {
+func parseHead(buf *bufio.Reader) (http.Method, http.Headers, error) {
 	headers := make(http.Headers)
 	var method http.Method
 
-	scanner := bufio.NewScanner(r)
-	scanner.Split(bufio.ScanLines)
-
-	scanner.Scan()
-	line := scanner.Text()
-	method, err := parseRequestLine(line)
+	line, err := buf.ReadString('\n')
+	if err != nil {
+		return "", nil, fmt.Errorf("error reading HTTP request line: %s", err)
+	}
+	line = strings.TrimRight(line, "\r\n")
+	method, err = parseRequestLine(line)
 	if err != nil {
 		return "", nil, fmt.Errorf("error parsing HTTP request line: %s", err)
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := buf.ReadString('\n')
+		if err != nil {
+			return "", nil, fmt.Errorf("error reading HTTP header line: %s", err)
+		}
+		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
 			break
 		}
@@ -171,27 +175,8 @@ func parseHead(r io.Reader) (http.Method, http.Headers, error) {
 	return method, headers, nil
 }
 
-type method string
-
-const (
-	get    method = "GET"
-	delete method = "DELETE"
-	patch  method = "PATCH"
-	post   method = "POST"
-	put    method = "PUT"
-)
-
-// constant for legal HTTP methods
-var methods = []method{
-	get,
-	delete,
-	patch,
-	post,
-	put,
-}
-
 func parseMethod(s string) (http.Method, error) {
-	if slices.Contains(methods, method(s)) {
+	if slices.Contains(http.ValidMethods, http.Method(s)) {
 		return http.Method(s), nil
 	} else {
 		return "", fmt.Errorf("%s is not a valid HTTP method", s)
@@ -209,7 +194,6 @@ func parseRequestLine(line string) (http.Method, error) {
 func parseHeader(line string) (h string, v string, err error) {
 	elements := strings.Split(line, ": ")
 	if len(elements) != 2 {
-		print("failed at length check")
 		err = fmt.Errorf("%s is not a valid HTTP header", line)
 	} else {
 		// HTTP headers are case-insensitive
@@ -223,18 +207,21 @@ func numBodyBytes(h http.Headers) int {
 	_, hasContentType := h["content-type"]
 	length, hasContentLength := h["content-length"]
 
-	var numBytes int
 	if hasContentType && hasContentLength {
-		numBytes, _ = strconv.Atoi(length)
+		numBytes, _ := strconv.Atoi(length)
+		return numBytes
 	}
-	return numBytes
+	return 0
 }
 
-func readBody(r io.Reader, numBytes int) (string, error) {
-	buf := make([]byte, numBytes)
-	_, err := io.ReadFull(r, buf)
+func readBody(buf *bufio.Reader, numBytes int) (string, error) {
+	b := make([]byte, numBytes)
+	numBytesRead, err := io.ReadFull(buf, b)
 	if err != nil {
 		return "", fmt.Errorf("error reading request body: %s", err)
 	}
-	return string(buf), nil
+	if numBytesRead != numBytes {
+		return "", fmt.Errorf("expected %d bytes, got %d bytes", numBytes, numBytesRead)
+	}
+	return string(b), nil
 }
