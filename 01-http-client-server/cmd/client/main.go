@@ -8,8 +8,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"simple-client-server/internal/http"
 	"strconv"
-	"strings"
 )
 
 const noBody = ""
@@ -91,45 +91,31 @@ func makeConnection(p *clientParams) (net.Conn, error) {
 	return conn, nil
 }
 
-func buildRequest(p *clientParams) string {
-	var httpMethod string
-	if p.payload != noBody {
-		httpMethod = "GET"
-	} else {
-		httpMethod = "POST"
-	}
-	methodHeader := fmt.Sprintf("%s / HTTP/1.1", httpMethod)
-	hostHeader := fmt.Sprintf("Host: %s", p.host)
-	closeHeader := "Connection: close"
-	blankLine := ""
+func buildRequest(p *clientParams) *http.Request {
+	var method http.Method
+	var headers = http.Headers{}
 
-	var lines []string
-	if p.payload != noBody {
-		contentTypeHeader := "Content-Type: text/plain"
-		contentLengthHeader := fmt.Sprintf("Content-Length: %d", len(p.payload))
-		lines = []string{
-			methodHeader,
-			hostHeader,
-			contentTypeHeader,
-			contentLengthHeader,
-			closeHeader,
-			blankLine,
-			p.payload,
-		}
+	hasBody := p.payload != noBody
+	if hasBody {
+		method = http.Post
+		headers["Content-Type"] = "text/plain"
+		headers["Content-Length"] = fmt.Sprintf("%d", len(p.payload))
 	} else {
-		lines = []string{
-			methodHeader,
-			hostHeader,
-			closeHeader,
-			blankLine,
-		}
+		method = http.Get
 	}
-	return strings.Join(lines, "\r\n")
+	headers["Host"] = p.host
+	headers["Connection"] = "close"
+
+	return &http.Request{
+		Method:  method,
+		Headers: headers,
+		Body:    []byte(p.payload),
+		HasBody: hasBody,
+	}
 }
 
-func writeRequest(conn net.Conn, request string) error {
-	fmt.Printf("%s\n", request)
-	_, err := conn.Write([]byte(request))
+func writeRequest(conn net.Conn, request *http.Request) error {
+	err := request.Encode(conn)
 	if err != nil {
 		return fmt.Errorf("error sending HTTP request: %s", err)
 	}
